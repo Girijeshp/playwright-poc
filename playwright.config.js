@@ -17,7 +17,7 @@ export default defineConfig({
     reporter: 'html',
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
-    headless:false,
+    headless:process.env.CI ? true : false,
     screenshot:'only-on-failure',
     baseURL:'https://testing.qaautomationlabs.com/',
 

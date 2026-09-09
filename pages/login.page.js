@@ -1,4 +1,5 @@
-class login{
+const {expect} = require('@playwright/test');
+class loginPage{
     constructor(page){
         this.page = page;
         this.usernameInput = page.locator('#user-name');
@@ -19,7 +20,10 @@ class login{
         await this.enterUsername(username);
         await this.enterPassword(password);
         await this.clickLoginButton();
+        await expect(this.page).toHaveURL('https://www.saucedemo.com/inventory.html');
+        console.log('Login successful, navigated to inventory page');// check if the URL is correct after login.
+       
     }
 
 }
-module.exports = login;
+module.exports = loginPage;
