@@ -45,9 +45,17 @@ export default defineConfig({
       dependencies:['Setup'],
     },
 
+    {name: 'authenticated-firefox-problemUser',
+      use:{browserName:'firefox',
+        storageState:'.auth/problemUser.json',
+      },
+      dependencies:['Setup'],
+
+    },
+
     {
       name: 'login-test',
-      testMatch: /login\.spec\.js/,
+      testMatch: /(?:login|multiLogin)\.spec\.js/,
       use:{browserName:'chromium'},
 
     },
