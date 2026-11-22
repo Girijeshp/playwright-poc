@@ -1,66 +1,40 @@
-// @ts-check
-import { defineConfig, devices } from '@playwright/test';
+const { defineConfig, devices } = require('@playwright/test');
+const config = require('./utils/config');
 
-/**
- * Read environment variables from file.
- * https://github.com/motdotla/dotenv
- */
-// import dotenv from 'dotenv';
-// import path from 'path';
-// dotenv.config({ path: path.resolve(__dirname, '.env') });
+module.exports = defineConfig({
+  testDir: './tests',
+  outputDir: 'test-results',
 
-/**
- * @see https://playwright.dev/docs/test-configuration
- */
-export default defineConfig({
-  testDir: './tests', /*  */
-    reporter: 'html',
-  /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
+  // Each test gets its own isolated browser context, so tests can safely run in parallel
+  fullyParallel: true,
+  workers: process.env.CI ? 2 : 4,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 1 : 0,
+
+  timeout: 30_000,
+  expect: { timeout: 10_000 },
+
+  reporter: [
+    ['list'],
+    ['html', { open: 'never' }],
+    ['json', { outputFile: 'test-results/results.json' }],
+    ['junit', { outputFile: 'test-results/junit.xml' }],
+  ],
+
   use: {
-    headless:process.env.CI ? true : false,
-    screenshot:'only-on-failure',
-    baseURL:'https://www.saucedemo.com',
-
-    /* Base URL to use in actions like `await page.goto('')`. */
-    // baseURL: 'http://localhost:3000',
-
-    /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
+    baseURL: config.baseUrl,
+    testIdAttribute: 'data-test', // lets page objects use getByTestId() for SauceDemo's data-test attributes
+    actionTimeout: 10_000,
+    navigationTimeout: 30_000,
+    screenshot: 'only-on-failure',
     video: 'retain-on-failure',
     trace: 'on-first-retry',
   },
 
-  /* Configure projects for major browsers */
+  // npm scripts select one project with --project=chromium; plain "npx playwright test" runs all three
   projects: [
-
-    {
-      name:'Setup',
-      testMatch: /auth\.setup\.js/,
-    },
-
-    {
-      name: 'authenticated-chromium',
-      use: { browserName: 'chromium',
-        storageState:'.auth/user.json',
-      },
-      dependencies:['Setup'],
-    },
-
-    {name: 'authenticated-firefox-problemUser',
-      use:{browserName:'firefox',
-        storageState:'.auth/problemUser.json',
-      },
-      dependencies:['Setup'],
-
-    },
-
-    {
-      name: 'login-test',
-      testMatch: /(?:login|multiLogin)\.spec\.js/,
-      use:{browserName:'chromium'},
-
-    },
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
+    { name: 'webkit', use: { ...devices['Desktop Safari'] } },
   ],
-
- 
 });
-
