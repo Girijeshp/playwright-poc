@@ -1,0 +1,137 @@
+name: Playwright CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "30 1 * * *" # nightly, 07:00 IST
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: "Group to run"
+        type: choice
+        default: regression
+        options:
+          - regression
+          - sanity
+          - smoke
+
+permissions:
+  contents: read
+
+# A new push to the same PR cancels the older run; main and nightly runs are never cancelled.
+concurrency:
+  group: playwright-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: Test (${{ matrix.browser }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # Nightly runs all three engines; every other trigger runs Chromium only
+        browser: ${{ github.event_name == 'schedule' && fromJSON('["chromium","firefox","webkit"]') || fromJSON('["chromium"]') }}
+    env:
+      # Pull requests run the fast smoke group; main, nightly and manual runs default to full regression
+      SUITE: ${{ inputs.suite || (github.event_name == 'pull_request' && 'smoke') || 'regression' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install browser
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+
+      # CI=true is set by GitHub Actions: this enables 1 retry and 2 workers (see playwright.config.js)
+      - name: Run tests
+        run: npx playwright test --project=${{ matrix.browser }} --grep "@$SUITE"
+
+      - name: Write results to the job summary
+        if: always()
+        run: node scripts/summary.js test-results/results.json "${{ matrix.browser }}, @$SUITE" >> "$GITHUB_STEP_SUMMARY"
+
+      # if: always() so the report, traces, screenshots and videos are kept even when tests fail
+      - name: Upload HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ matrix.browser }}
+          path: playwright-report/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload traces, screenshots and videos
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.browser }}
+          path: test-results/
+          if-no-files-found: warn
+          retention-days: 14
+
+  # CD: publish the latest HTML report as a web page. Runs on main only, whether tests passed or failed.
+  publish-report:
+    name: Publish report to GitHub Pages
+    needs: test
+    if: ${{ always() && github.ref == 'refs/heads/main' && (needs.test.result == 'success' || needs.test.result == 'failure') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Download report artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: playwright-report-*
+          path: downloaded
+
+      - name: Assemble site
+        run: |
+          mkdir -p site
+          for dir in downloaded/playwright-report-*; do
+            browser="${dir#downloaded/playwright-report-}"
+            mkdir -p "site/$browser"
+            cp -r "$dir/." "site/$browser/"
+          done
+          {
+            echo '<!doctype html><meta charset="utf-8"><title>SauceDemo Playwright Reports</title>'
+            echo '<h1>SauceDemo Playwright: latest test reports</h1><ul>'
+            for d in site/*/; do
+              b=$(basename "$d")
+              echo "<li><a href=\"$b/\">$b</a></li>"
+            done
+            echo "</ul><p>Workflow run ${{ github.run_number }}, commit ${{ github.sha }}</p>"
+          } > site/index.html
+
+      - name: Set up Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
